@@ -23,6 +23,12 @@ const authSchema = new mongoose.Schema({
         enum: ["USER", "SELLER", "ADMIN"],
         default: "USER"
     },
+    provider: {
+        type: String
+    },
+    providerId: {
+        type: String
+    },
     //refresh token is stored one per user --> single device.
     refreshToken: {
         type: String

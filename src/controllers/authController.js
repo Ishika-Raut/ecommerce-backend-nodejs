@@ -8,6 +8,7 @@ import { ApiResponse } from "../utils/apiResponse.js";
 import { Otp } from "../models/otpModel.js";
 import { generateAccessAndRefreshTokens } from "../helpers/generateAccessAndRefreshTokens.js";
 import { generateToken } from "../utils/generateToken.js";
+import { OAuth2Client } from "google-auth-library";
 
 
 export const register = async (req, res, next) =>   {
@@ -245,19 +246,19 @@ export const refreshAccessToken = async (req, res, next) => {
         await user.save();
 
         // Update refresh token cookie
-    res.cookie("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "Strict",
-        maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY_MS)
-    });
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "Strict",
+            maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY_MS)
+        });
 
-    // Send new access token in response
-    return ApiResponse(res, HTTP_STATUS.OK, "New access and refresh tokens generated successfully", null, 
-        {
-            accessToken: newAccessToken
-        }
-    );
+        // Send new access token in response
+        return ApiResponse(res, HTTP_STATUS.OK, "New access and refresh tokens generated successfully", null, 
+            {
+                accessToken: newAccessToken
+            }
+        );
     } catch (error) {
         console.log("refresh access token error", error);
         next(error);
@@ -268,20 +269,85 @@ export const refreshAccessToken = async (req, res, next) => {
 
 /*
 How OAuth 2.0 with Google works
-1. User clicks Login with Google on frontend
-2. Google returns a tokenId
-3. Backend verifies the token manually with Google
-4. Backend gets user info from Google
-5. Backend:
+1. User clicks Login with Google on frontend -> client redirects user to Google login page - FE
+2. Google authenticates used - FE
+3. Google returns a tokenId(OAuth + OpenID Connect) or authrzn code(traditional) to client - FE
+4. Client sends token to backend
+5. Backend verifies the token manually with Google
+6. Backend gets user info from Google
+7. Backend:
 5.1. finds user in DB
 5.2. or creates a new user
 6. Backend issues JWT access + refresh tokens
 7. Backend sets refresh token in cookie
 8. User is logged in
-
 */
+//Full Authoriztion code flow google sent authorzn code
 
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+export const googleOAuthLogin = async (req, res, next) => {
+    try 
+    {
+        const { tokenId } = req.body;
+        if(!tokenId)
+        {
+            return ApiError(res, HTTP_STATUS.BAD_REQUEST, "Token is required!");
+        }
+        const response = await client.verifyIdToken({
+            idToken: tokenId,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
 
+        const payload = response.getPayload();
+        const {email, name, sub:providerId} = payload;
 
+        if(!email)
+        {
+            return ApiError(res, HTTP_STATUS.BAD_REQUEST, `This email has no Google account!`);
+        }
+        
+        let user = await User.findOne({email});
+        if(!user)
+        {
+            user = await User.create({
+                name,
+                email, 
+                isEmailVerified: true,
+                provider: "google",
+                providerId
+            });
+        }
+        if(user && user.provider && user.provider !== "google")
+        {
+            return ApiError(res, HTTP_STATUS.CONFLICT, "Email already registered!")
+        }
+        
+        const { newAccessToken, newRefreshToken } = await generateAccessAndRefreshTokens(user);
+
+        user.refreshToken = newRefreshToken;
+        await user.save();
+
+        // store refreh token in HTTP cookie only
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true, // Prevents JS from accessing cookie. Protects against XSS (Cross-Site Scripting) attacks.
+            secure: true, // Cookie will only be sent over HTTPS. Won’t work on plain HTTP
+            sameSite: "Strict", // Cookie is sent only when request originates from same site
+            maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY_MS),
+        });
+
+        return ApiResponse(res, HTTP_STATUS.OK, 
+            "User logged in successfully!",
+            {
+                name: user.name,
+                email: user.email
+            },
+            { newAccessToken }   // send access token in authorization header
+        );
+
+    } catch (error) {
+        console.log("Google OAuth login", error);
+        next(error);
+    }
+}
 
 
