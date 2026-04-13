@@ -30,7 +30,7 @@ export const register = async (req, res, next) =>   {
             return ApiResponse(res, HTTP_STATUS.OK, `OTP is sent on ${email}`);
         }
 
-        //case 3- User does not exist and not  verified
+        //case 3- User does not exist and not verified
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -124,7 +124,7 @@ export const login = async (req, res, next) => {
         }
 
         const accessToken = generateToken({
-            payload: {id: user._id, email: user.email},
+            payload: {id: user._id, role: user.role, },
             secret: process.env.ACCESS_TOKEN_SECRET,
             expiresIn: process.env.ACCESS_TOKEN_EXPIRY
         });
@@ -269,21 +269,25 @@ export const refreshAccessToken = async (req, res, next) => {
 
 /*
 How OAuth 2.0 with Google works
-1. User clicks Login with Google on frontend -> client redirects user to Google login page - FE
-2. Google authenticates used - FE
+1. User clicks Login with Google -> client redirects user to Google login page - FE
+2. Google authenticates user - FE
 3. Google returns a tokenId(OAuth + OpenID Connect) or authrzn code(traditional) to client - FE
 4. Client sends token to backend
-5. Backend verifies the token manually with Google
-6. Backend gets user info from Google
-7. Backend:
-5.1. finds user in DB
-5.2. or creates a new user
-6. Backend issues JWT access + refresh tokens
-7. Backend sets refresh token in cookie
-8. User is logged in
+5. Backend verifies the tokenId manually with Google API verifyIdToken() - BE
+6. Backend gets user info from tokenId (Google) - BE
+7. Backend finds user in DB - BE
+7.2. if user exists then make user login  - BE
+7.2. if user does not exist then create a new user - register the user - BE
+8. In both cases Backend issues JWT access + refresh tokens - BE
+9. Backend sets refresh token in cookie and also stores it in db - BE
+10. User is logged in
 */
 //Full Authoriztion code flow google sent authorzn code
 
+// OAuth2Client - This comes from Google’s official library
+// Creating a Google OAuth client instance. 
+// This client will be used to: verify Google tokens and talks securely with Google servers
+// We pass CLIENT ID - So Google can verify: This token was issued for THIS app
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 export const googleOAuthLogin = async (req, res, next) => {
     try 
@@ -293,13 +297,17 @@ export const googleOAuthLogin = async (req, res, next) => {
         {
             return ApiError(res, HTTP_STATUS.BAD_REQUEST, "Token is required!");
         }
+        // This sends your tokenId to Google (internally) and verifies it.
+        // Google signs token using RS256 (private key)
+        // Google SDK verifies - checks token signature, checks expiry, checks issuer (Google), checks audience (your app)
+        // This method returns LoginTicket object after successful verification which contains verified payload (user data)
         const response = await client.verifyIdToken({
             idToken: tokenId,
             audience: process.env.GOOGLE_CLIENT_ID
         });
 
-        const payload = response.getPayload();
-        const {email, name, sub:providerId} = payload;
+        const payload = response.getPayload();  //Extracts actual user data from token
+        const {email, name, sub:providerId} = payload;  //Take sub from payload and rename it as providerId
 
         if(!email)
         {
@@ -307,6 +315,14 @@ export const googleOAuthLogin = async (req, res, next) => {
         }
         
         let user = await User.findOne({email});
+        // user - if user already exists in DB
+        // user.provider - tells HOW user registered - "google", "github", "email", etc
+        // user.provider !== "google" - User did NOT register using Google
+        if(user && user.provider && user.provider !== "google")
+        {
+            return ApiError(res, HTTP_STATUS.CONFLICT, "Email already registered!")
+        }
+        
         if(!user)
         {
             user = await User.create({
@@ -316,10 +332,6 @@ export const googleOAuthLogin = async (req, res, next) => {
                 provider: "google",
                 providerId
             });
-        }
-        if(user && user.provider && user.provider !== "google")
-        {
-            return ApiError(res, HTTP_STATUS.CONFLICT, "Email already registered!")
         }
         
         const { newAccessToken, newRefreshToken } = await generateAccessAndRefreshTokens(user);
