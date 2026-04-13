@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+const role = ["Customer", "Seller", "SuperAdmin", "Admin"]
+
 const authSchema = new mongoose.Schema({
     name: {
         type:String,
@@ -18,10 +20,15 @@ const authSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    isActive:
+    {
+        type: Boolean,
+        default: true
+    },
     role: {
         type: String,
-        enum: ["USER", "SELLER", "ADMIN"],
-        default: "USER"
+        enum: role,
+        default: role[0] //"Customer"
     },
     provider: {
         type: String

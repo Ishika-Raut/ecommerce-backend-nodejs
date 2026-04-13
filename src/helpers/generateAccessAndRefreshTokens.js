@@ -4,7 +4,7 @@ export const generateAccessAndRefreshTokens = async (user) => {
     try 
     {       
         const newAccessToken = generateToken({
-            payload: { id: user._id, email: user.email },
+            payload: { id: user._id, role: user.role },
             secret: process.env.ACCESS_TOKEN_SECRET,
             expiresIn: process.env.ACCESS_TOKEN_EXPIRY
         });
