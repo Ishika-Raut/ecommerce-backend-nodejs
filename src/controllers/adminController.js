@@ -5,6 +5,7 @@ import { ApiError } from "../utils/apiError.js";
 import { sendEamil } from "../services/sendEmailService.js";
 import { HTTP_STATUS } from "../utils/httpStatusCodes.js";
 import { ApiResponse } from "../utils/apiResponse.js";
+import { Seller } from "../models/sellerModel.js";
 
 export const addAdmin = async (req, res, next) => {
     try 
@@ -69,3 +70,44 @@ export const deactivateAdmin = async (req, res, next) => {
         next(error);
     }
 }
+
+
+//Approve or Reject the request
+export const  approveOrRejectRequest = async (req, res, next) => {
+    try 
+    {
+        const requestId = req.params.id;
+        const { requestStatus } = req.query;
+       
+        const sellerRequest = await Seller.findById(requestId);
+        if(!sellerRequest)
+        {
+            return ApiError(res, HTTP_STATUS.NOT_FOUND, `No seller request for this id!`);
+        }
+        
+        sellerRequest.status = requestStatus;
+        await sellerRequest.save();
+
+        if(requestStatus == "Approved")
+        {
+            const userId = sellerRequest.userId;
+
+            const user = await User.findById(userId);
+            if(!user)
+            {
+                return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user exist!`);
+            }
+
+            user.role = "Seller";
+            await user.save();
+        }
+        return ApiResponse(res, HTTP_STATUS.OK, `Request for Seller is fullfilled!`);
+    } 
+    catch (error) 
+    {
+        console.log("Approve request error", error);
+        next(error);
+    }
+}
+
+
