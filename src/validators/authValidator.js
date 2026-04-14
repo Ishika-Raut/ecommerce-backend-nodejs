@@ -19,6 +19,16 @@ export const loginValidator = Joi.object({
 });
 
 
-export const updateAdmin = Joi.object({
+export const updateAdminValidator = Joi.object({
   email: Joi.string().email().required(),
+});
+
+
+export const sellerRequestValidator = Joi.object({
+    businessName: Joi.string().min(5).max(50).trim().required(),
+    address: Joi.object({
+        city: Joi.string().min(2).max(50).trim().required(),
+        state: Joi.string().min(2).max(50).trim().required(),
+        pincode: Joi.string().pattern(/^[0-9]{6}$/).required(),   // Indian pincode validation
+    }).required(),
 });
