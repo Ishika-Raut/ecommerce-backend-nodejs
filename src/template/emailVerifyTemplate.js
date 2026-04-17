@@ -1,4 +1,4 @@
-export const emailVerifiyTemplate = (email, otp) => {
+export const emailVerifyTemplate = (email, otp) => {
     return `<div>
             <p>You are recieving this email to verify your eamil address: ${email}</p>
             <p>To verify your email please enter this OTP: ${otp}. </p>

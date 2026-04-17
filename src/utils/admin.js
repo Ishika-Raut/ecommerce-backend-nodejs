@@ -14,7 +14,11 @@ export const createAdmin = async () => {
         await mongoose.connect(process.env.MONGO_URL);
         
         //check if admin exist
-        const isAdminExist = await User.findOne({ role: "SuperAdmin", email: process.env.ADMIN_EMAIL});
+        const isAdminExist = await User.findOne({ 
+            role: "SuperAdmin", 
+            email: process.env.ADMIN_EMAIL,
+            //phone: process.env.ADMIN_PHONE,
+        });
         if(isAdminExist)
         {
             // do nothing if admin exist - jsut close db conn and return
@@ -26,11 +30,14 @@ export const createAdmin = async () => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         await User.create({
-            name: "Super Admin",
+            firstName: "Super", 
+            lastName: "Admin",
             email: process.env.ADMIN_EMAIL,
             password: hashedPassword,
             isEmailVerified: true,
+            isPhoneVerified: true,
             role: "SuperAdmin", //must match with it schema enum
+            accountStatus: "Active"
         });
 
         const html = adminAccountTemplate(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);

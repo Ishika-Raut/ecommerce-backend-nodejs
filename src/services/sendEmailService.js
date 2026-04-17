@@ -16,7 +16,7 @@ export const sendEamil = async (email, subject, html) => {
                 pass: process.env.SMTP_PASSWORD,
             },
         });
-
+        console.log("email = ", email);
         const mailOptions = {
             from: `"support" <${process.env.SMTP_EMAIL}>`, //sender email - that will be shown to reciever
             to: email,

@@ -6,11 +6,12 @@ import { sendEamil } from "../services/sendEmailService.js";
 import { HTTP_STATUS } from "../utils/httpStatusCodes.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { Seller } from "../models/sellerModel.js";
+import { accountStatus } from "../configs/enums/authEnum.js";
 
 export const addAdmin = async (req, res, next) => {
     try 
     {
-        const { name, email, password } = req.body;
+        const { firstName, lastName, email, phone, password } = req.body;
         const user = await User.findOne({email});
         if(user && user.role === "Admin")
         {
@@ -21,11 +22,15 @@ export const addAdmin = async (req, res, next) => {
         const hashedPassword = await bcrypt.hash(password, salt);
         
         const newAdmin = await User.create({
-            name, 
+            firstName, 
+            lastName,
             email,
+            phone,
             password: hashedPassword,
-            isEmailVerified: true, 
+            isEmailVerified: true,
+            isPhoneVerified: true, 
             role: "Admin",
+            accountStatus: "Active"
         });
 
         const html = adminAccountTemplate(email, password);
@@ -46,23 +51,33 @@ export const addAdmin = async (req, res, next) => {
 }
 
 
-export const deactivateAdmin = async (req, res, next) => {
+export const updateAdminStatus = async (req, res, next) => {
     try 
     {
-        const { email } = req.body;
+        const { email, status } = req.body;
         const user = await User.findOne({email});
         if(!user || user.role !== "Admin")
         {
             return ApiError(res, HTTP_STATUS.CONFLICT, `${email} is not an Admin!`);
         }
-        user.isActive = false;
-        await user.save();
-
-        return ApiResponse(res, HTTP_STATUS.CREATED, `Admin is deactivated!`,
+        
+        if(user.accountStatus === "Active" && status === "Deactive")
+        {
+            user.accountStatus = status
+            await user.save();
+            return ApiResponse(res, HTTP_STATUS.CREATED, `Admin is deactivated!`,
+                {
+                     email: user.email
+                });
+        } else {
+             user.accountStatus = status
+            await user.save();
+            return ApiResponse(res, HTTP_STATUS.CREATED, `Admin is Activated!`,
             {
                 email: user.email
             }
         );
+        }
     } 
     catch (error) 
     {

@@ -1,24 +1,29 @@
 import mongoose from "mongoose";
+import { accountStatus, role } from "../configs/enums/authEnum.js";
 
-const role = ["Customer", "Seller", "SuperAdmin", "Admin"]
 
 const authSchema = new mongoose.Schema({
-    name: {
+    firstName: {
         type:String,
         required: true
     },
-    email: {
+    lastName: {
         type:String,
-        required: true,
-        unique: true
+        required: true
     },
     password: {
         type: String,
     },
-    phone:{
-        type: Number,
+    email: {
+        type:String,
+        unique: true
     },
-    isPhoneNumVerified: {
+    phone:{
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    isPhoneVerified: {
         type: Boolean,
         default: false
     },
@@ -26,10 +31,10 @@ const authSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    isActive:
-    {
-        type: Boolean,
-        default: true
+    accountStatus: {
+        type: String,
+        enum: accountStatus,
+        default: accountStatus[0] //"Pending"
     },
     role: {
         type: String,
