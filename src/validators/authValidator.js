@@ -25,8 +25,21 @@ export const verifyOtpValidator = Joi.object({
 
 export const loginValidator = Joi.object({
   email: Joi.string().email().required(),
-  password: Joi.string().required(),
+  password: Joi.string().min(8).required(),
 });
+
+
+export const requestForPasswordResetValidator = Joi.object({
+  email: Joi.string().email().required(),
+});
+
+
+export const resetPasswordValidator = Joi.object({
+  token: Joi.string().required(),
+  newPassword: Joi.string().min(8).required(),
+  confirmPassword: Joi.string().min(8).required()
+});
+
 
 
 

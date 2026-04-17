@@ -47,6 +47,14 @@ const authSchema = new mongoose.Schema({
     providerId: {
         type: String
     },
+    passwordResetToken: {
+    type: String,
+    default: null
+    },
+    passwordResetTokenExpiration: {
+        type: Date,
+        default: null
+    },
     //refresh token is stored one per user --> single device.
     refreshToken: {
         type: String
