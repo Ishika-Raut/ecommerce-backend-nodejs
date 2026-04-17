@@ -3,55 +3,130 @@ import crypto from "crypto";
 import { User } from "../models/authModel.js";
 import { ApiError } from "../utils/apiError.js";
 import { HTTP_STATUS } from "../utils/httpStatusCodes.js";
-import { sendOtp } from "../helpers/sendOtp.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { Otp } from "../models/otpModel.js";
 import { generateAccessAndRefreshTokens } from "../helpers/generateAccessAndRefreshTokens.js";
 import { generateToken } from "../utils/generateToken.js";
 import { OAuth2Client } from "google-auth-library";
+import { sendEamil } from "../services/sendEmailService.js";
+import { sendSms } from "../services/sendSmsService.js";
+import { emailVerifyTemplate } from "../template/emailVerifyTemplate.js";
+import { accountStatus } from "../configs/enums/authEnum.js";
+
 
 
 export const register = async (req, res, next) =>   {
-    try 
+    try     
     {
-        const { name, email, password } = req.body;
-        const user = await User.findOne({email});
-        
-        //Case 1- User exist and verified
-        if(user && user.isEmailVerified)
-        {
-            return ApiError(res, HTTP_STATUS.CONFLICT, `${email} is already registered and verified!`);
-        }
-
-        //case 2- User exist but not verified
-        if(user && !user.isEmailVerified)
-        {
-            await sendOtp(user._id, user.email);
-            return ApiResponse(res, HTTP_STATUS.OK, `OTP is sent on ${email}`);
-        }
-
-        //case 3- User does not exist and not verified
+        const { firstName, lastName, password } = req.body;
+       
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
         const newUser = await User.create({
-            name, 
-            email,
+            firstName, 
+            lastName,
             password: hashedPassword,
-            isEmailVerified: false, 
         })
 
-        await sendOtp(newUser._id, email);
-
-        return ApiResponse(res, HTTP_STATUS.CREATED, `User is registered and OTP sent on email: ${email}`,
+        return ApiResponse(res, HTTP_STATUS.CREATED, `User registered successfully!`,
             {
-                name: newUser.name,
-                email: newUser.email
+                firstName: newUser.firstName,
+                lastName: newUser.lastName,
+                _id: newUser._id
             }
         );
-    } catch (error) {
+    } 
+    catch (error) 
+    {
         console.log("Register user error", error);
         next(error);
+    }
+}
+
+
+
+export const sendOtp = async (req, res) => {
+    try 
+    {
+        const { userId, email, phone, type } = req.body;
+
+        const user = await User.findById(userId);
+        if(!user)
+        {
+            return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user found!`);
+        }
+
+        if(user?.email && user?.phone)
+        {
+            if(user.accountStatus === accountStatus[1])
+            {
+                return ApiError(res, HTTP_STATUS.BAD_REQUEST, `User Already exist`);
+            }
+        }
+
+        const existingOtp = await Otp.findOne({ userId, otpType: type });
+
+        console.log("existingOtp = ", existingOtp);
+        //Generate 4-digit otp
+        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        
+        //hash otp
+        const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
+
+        //set expiry for otp - 5 minutes
+        const otpExpiration = new Date(Date.now() + 5 * 60 * 1000); 
+
+        //Only ONE active OTP per user should exist at a time
+        if (existingOtp) 
+        {
+            //Update Existing OTP
+            existingOtp.otp = hashedOtp;
+            existingOtp.otpExpiration = otpExpiration;
+            existingOtp.otpType = type;
+            await existingOtp.save();
+        } 
+        else 
+        {
+            //Create new OTP
+            await Otp.create({
+                userId,
+                otp: hashedOtp,
+                otpExpiration,
+                otpType: type,
+            });
+        }
+
+        if(type === "email")
+        {
+            if(!email)
+            {
+                return ApiError(res, HTTP_STATUS.BAD_REQUEST, `Please enter your email!`);
+            }
+            const html = emailVerifyTemplate(email, otp);
+            await sendEamil(email, "User Email Verification", html);
+            
+            user.email = email;
+            await user.save();
+        }
+        else if(type === "sms")
+        {
+            if(!phone)
+            {
+                return ApiError(res, HTTP_STATUS.BAD_REQUEST, `Please enter your phone number!`);
+            }
+            await sendSms(phone, otp);
+            
+            user.phone = phone;
+            await user.save();
+        }
+         
+        return ApiResponse(res, HTTP_STATUS.OK, `OTP sent successfully!`);
+    } 
+    catch (error) 
+    {
+        console.log("Send otp error", error);
+        throw error;
     }
 }
 
@@ -60,45 +135,81 @@ export const register = async (req, res, next) =>   {
 export const verifyOtp = async (req, res, next) => {
     try 
     {
-        const { email, otp} = req.body;
-        //find user
-        const user = await User.findOne({email});
-        if(!user)
+        const { email, phone, otp, type } = req.body;
+        let user;
+        if(email)
         {
-            return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user registered with email: ${email}`);
+            //find user
+            user = await User.findOne({email});
+            if(!user){
+                return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user registered with email: ${email}`);
+            }
+            await OTPVerify(user._id, otp, type, res)
+            
+            user.isEmailVerified = true;
+            await user.save();
         }
+
+        if(phone)
+        {
+            user = await User.findOne({phone});
+            if(!user){
+                return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user registered with phone number: ${phone}`);
+            }
+            await OTPVerify(user._id, otp, type, res)
+            
+            user.isPhoneVerified = true;
+            await user.save();
+        }
+        if(user.isPhoneVerified === true &&  user.isEmailVerified === true)
+        {
+            user.accountStatus = accountStatus[1]
+            await user.save();
+        }
+        return ApiResponse(res, HTTP_STATUS.OK, "OTP verified successfully");
+    } 
+    catch (error)
+    {
+        console.log("Verify otp error", error);
+        next(error);
+    }
+}
+
+
+
+export const OTPVerify = async (userId, otp, type, res) => {
+    try 
+    {
         //find otp for user
-        const existOtp = await Otp.findOne({userId: user._id});
+        const existOtp = await Otp.findOne({userId, otpType: type});
+        console.log("existingOtp = ", existOtp);
         if (!existOtp) 
         {
             return ApiError(res, HTTP_STATUS.NOT_FOUND, "OTP not found");
         }
-    // Check OTP expiration
-    // user.otpExpiration time - 10:35
-    // new Date() - gives current date and time - 10:36
-    // 10:36 > 10:35 => true - OTP expired!
-    if (!existOtp.otpExpiration || new Date() > existOtp.otpExpiration) 
+
+        // Check OTP expiration
+        // user.otpExpiration time - 10:35
+        // new Date() - gives current date and time - 10:36
+        // 10:36 > 10:35 => true - OTP expired!
+        if (!existOtp.otpExpiration || new Date() > existOtp.otpExpiration) 
+        {
+            return ApiError(res, HTTP_STATUS.BAD_REQUEST, "OTP expired");
+        }
+    
+        const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
+        if (hashedOtp !== existOtp.otp)
+        {
+            return ApiError(res, HTTP_STATUS.NOT_FOUND, "Invalid OTP!");
+        }
+
+        //delete otp after verify
+        await Otp.deleteOne({ _id: existOtp._id });    
+    } 
+    catch (error) 
     {
-        return ApiError(res, HTTP_STATUS.BAD_REQUEST, "OTP expired");
-    }
-
-    const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
-    if (hashedOtp !== existOtp.otp)
-    {
-       return ApiError(res, HTTP_STATUS.NOT_FOUND, "Invalid OTP!");
-    }
-
-    user.isEmailVerified = true;
-    await user.save();
-
-    //delete otp after verify
-    await Otp.deleteOne({ _id: existOtp._id }); 
-
-    return ApiResponse(res, HTTP_STATUS.OK, "OTP verified successfully");
-
-    } catch (error) {
-        console.log("Verify otp error", error);
-        next(error);
+        console.log("OTP Verify error", error);
+        throw error;
     }
 }
 
@@ -111,11 +222,15 @@ export const login = async (req, res, next) => {
         const user = await User.findOne({email});
         if(!user)
         {
-            return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user registered with email: ${email}`);
+            return ApiError(res, HTTP_STATUS.NOT_FOUND, `No user found!`);
         }
         if(!user.isEmailVerified)
         {
             return ApiError(res, HTTP_STATUS.UNAUTHORIZED, `Your email is not verified!`);
+        }
+        if(!user.isPhoneVerified)
+        {
+            return ApiError(res, HTTP_STATUS.UNAUTHORIZED, `Your phone is not verified!`);
         }
         const isPasswordMatched = bcrypt.compare(password, user.password);
         if(!isPasswordMatched)
@@ -149,8 +264,7 @@ export const login = async (req, res, next) => {
             maxAge: parseInt(process.env.REFRESH_TOKEN_EXPIRY_MS),
         });
 
-        return ApiResponse(res, HTTP_STATUS.OK, 
-            "User logged in successfully!",
+        return ApiResponse(res, HTTP_STATUS.OK, "User logged in successfully!",
             {
                 name: user.name,
                 email: user.email

@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+const otpType = ["email", "sms"];
+
 const otpSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -15,7 +17,12 @@ const otpSchema = new mongoose.Schema({
         type: Date,
         required: true,
         index: { expires: 0 } // TTL - MongoDB will automatically remove expired OTPs
-    }
+    },
+    otpType: {
+        type: String,
+        enum: otpType,
+        default: otpType[0] //"email"
+    },
 }, 
 {
     timestamps: true
