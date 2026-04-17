@@ -12,6 +12,7 @@ import { sendEamil } from "../services/sendEmailService.js";
 import { sendSms } from "../services/sendSmsService.js";
 import { emailVerifyTemplate } from "../template/emailVerifyTemplate.js";
 import { accountStatus } from "../configs/enums/authEnum.js";
+import { forgetPasswordTemplate } from "../template/forgetPasswordTemplate.js";
 
 
 
@@ -161,7 +162,7 @@ export const verifyOtp = async (req, res, next) => {
             user.isPhoneVerified = true;
             await user.save();
         }
-        if(user.isPhoneVerified === true &&  user.isEmailVerified === true)
+        if(user && user.isPhoneVerified && user.isEmailVerified)
         {
             user.accountStatus = accountStatus[1]
             await user.save();
@@ -228,11 +229,15 @@ export const login = async (req, res, next) => {
         {
             return ApiError(res, HTTP_STATUS.UNAUTHORIZED, `Your email is not verified!`);
         }
+        if(user.provider === "google")
+        {
+            return ApiError(res, HTTP_STATUS.UNAUTHORIZED, `Login with google account!`);
+        }
         if(!user.isPhoneVerified)
         {
             return ApiError(res, HTTP_STATUS.UNAUTHORIZED, `Your phone is not verified!`);
         }
-        const isPasswordMatched = bcrypt.compare(password, user.password);
+        const isPasswordMatched = await bcrypt.compare(password, user.password);
         if(!isPasswordMatched)
         {
             return ApiError(res, HTTP_STATUS.UNAUTHORIZED, "Invalid Password!");
@@ -415,11 +420,12 @@ export const googleOAuthLogin = async (req, res, next) => {
         // Google signs token using RS256 (private key)
         // Google SDK verifies - checks token signature, checks expiry, checks issuer (Google), checks audience (your app)
         // This method returns LoginTicket object after successful verification which contains verified payload (user data)
+        console.log("tokenId = ", tokenId);
         const response = await client.verifyIdToken({
             idToken: tokenId,
             audience: process.env.GOOGLE_CLIENT_ID
         });
-
+        console.log("response = ", response);
         const payload = response.getPayload();  //Extracts actual user data from token
         const {email, name, sub:providerId} = payload;  //Take sub from payload and rename it as providerId
 
@@ -440,7 +446,8 @@ export const googleOAuthLogin = async (req, res, next) => {
         if(!user)
         {
             user = await User.create({
-                name,
+                firstName: name,
+                lastName: name,
                 email, 
                 isEmailVerified: true,
                 provider: "google",
@@ -464,7 +471,8 @@ export const googleOAuthLogin = async (req, res, next) => {
         return ApiResponse(res, HTTP_STATUS.OK, 
             "User logged in successfully!",
             {
-                name: user.name,
+                firstName: user.firstName,
+                lastName: user.lastName,
                 email: user.email
             },
             { newAccessToken }   // send access token in authorization header
@@ -477,4 +485,96 @@ export const googleOAuthLogin = async (req, res, next) => {
 }
 
 
+export const requestForPasswordReset = async (req, res, next) => {
+    try 
+    {
+        const { email } = req.body;
 
+        const user = await User.findOne({ email });
+        if(!user)
+        {
+            return ApiError(res, HTTP_STATUS.NOT_FOUND, "No user registered with this email");
+        }
+        if(user.provider === "google")
+        {
+            return ApiError(res, HTTP_STATUS.UNAUTHORIZED, `Login with google account!`);
+        }
+        // Prevent unverified users from resetting password
+        if (!user.isEmailVerified || !user.isPhoneVerified) 
+        {
+            return ApiError(res, HTTP_STATUS.UNAUTHORIZED, "Please verify your email and phone first.");
+        }
+
+        //Generate secure token
+        //Generates 32 random bytes. Each byte is 8 bits --> 32 bytes
+        //Why 32 bytes - Long enough to prevent brute force - secure and hard to guess
+        //.toString("hex") - Converts those 32 bytes into hexadecimal string
+        const resetToken = crypto.randomBytes(32).toString("hex");
+        const tokenExpiry = new Date(Date.now() + 10 * 60 * 1000);  // 10 min
+
+        const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+
+        user.passwordResetToken = hashedToken;
+        user.passwordResetTokenExpiration = tokenExpiry;
+        await user.save();
+
+        const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
+        console.log("Reset Link = ", resetLink);
+
+        const html = forgetPasswordTemplate(email, resetLink);
+        await sendEamil(email, "Request for password reset", html);
+
+        return ApiResponse(res, HTTP_STATUS.OK, "Link sent on your email");
+    } 
+    catch (error) 
+    {
+        console.log("request for password reset error", error);
+        next(error);
+    }
+}
+
+
+
+export const resetPassword = async (req, res, next) => {
+    try 
+    {
+        console.log("in reset pawd controller");
+        const { token , newPassword, confirmPassword } = req.body;
+
+        const hashedIncomingToken = crypto.createHash("sha256").update(token).digest("hex");
+
+        const user = await User.findOne({
+            passwordResetToken: hashedIncomingToken,
+            passwordResetTokenExpiration: { $gt: new Date() }
+        });
+        if(!user)
+        {
+            return ApiError(res, HTTP_STATUS.BAD_REQUEST, "Invalid or expired token!");
+        }
+        if (!user.isEmailVerified) 
+        {
+            return ApiError(res, HTTP_STATUS.UNAUTHORIZED, "Your email is not verified.");
+        }
+
+        //password reset in the db
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+        user.password = hashedPassword;
+        //invalidate reset token and its expiration in db
+        user.passwordResetToken = null;
+        user.passwordResetTokenExpiration = null;
+
+        //Refresh tokens Must be invalidated immediately on password reset.
+        //why ?
+        //Prevents old refresh tokens from generating new access tokens.
+        //Logs out the user from all devices/sessions.
+        user.refreshToken = null;
+        await user.save();
+
+        return ApiResponse(res, HTTP_STATUS.OK, "Password reset successfully"); 
+
+    } catch (error) {
+        console.log("Reset password error", error);
+        next(error);
+    }
+}
