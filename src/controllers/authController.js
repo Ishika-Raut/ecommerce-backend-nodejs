@@ -541,11 +541,15 @@ export const resetPassword = async (req, res, next) => {
         console.log("in reset pawd controller");
         const { token , newPassword, confirmPassword } = req.body;
 
+        if (newPassword !== confirmPassword) 
+        {
+            return ApiError(res, HTTP_STATUS.BAD_REQUEST, "Passwords do not match");
+        }
         const hashedIncomingToken = crypto.createHash("sha256").update(token).digest("hex");
 
         const user = await User.findOne({
             passwordResetToken: hashedIncomingToken,
-            passwordResetTokenExpiration: { $gt: new Date() }
+            passwordResetTokenExpiration: { $gt: new Date() }  //expired links won't work
         });
         if(!user)
         {

@@ -13,3 +13,9 @@ export const updateAdminStatusValidator = Joi.object({
   email: Joi.string().email().required(),
   status: Joi.string().valid("Active", "Deactive").required(),
 });
+
+
+
+export const addCategoryValidator = Joi.object({
+  categoryName: Joi.string().min(3).max(50).trim().uppercase().required(),
+}).options({ convert: true });  //enable auto conversion

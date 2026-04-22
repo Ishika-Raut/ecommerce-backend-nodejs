@@ -1,0 +1,1 @@
+export const productStatus = ["Draft", "Active", "Out of stock"];

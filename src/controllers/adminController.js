@@ -7,6 +7,7 @@ import { HTTP_STATUS } from "../utils/httpStatusCodes.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { Seller } from "../models/sellerModel.js";
 import { accountStatus } from "../configs/enums/authEnum.js";
+import { Category } from "../models/categoryModel.js";
 
 export const addAdmin = async (req, res, next) => {
     try 
@@ -69,7 +70,9 @@ export const updateAdminStatus = async (req, res, next) => {
                 {
                      email: user.email
                 });
-        } else {
+        } 
+        else 
+        {
              user.accountStatus = status
             await user.save();
             return ApiResponse(res, HTTP_STATUS.CREATED, `Admin is Activated!`,
@@ -121,6 +124,32 @@ export const  approveOrRejectRequest = async (req, res, next) => {
     catch (error) 
     {
         console.log("Approve request error", error);
+        next(error);
+    }
+}
+
+
+
+export const addCategory = async (req, res, next) => {
+    try 
+    {
+        const { categoryName } = req.body;
+
+        const category = Category.findOne({categoryName});
+        if(!category)
+        {
+            return ApiError(res, HTTP_STATUS.CONFLICT, `${categoryName} already exist!`);
+        }
+        
+        const id = req.user.id;
+        await Category.create({
+            categoryName,
+            adminId: id,
+        })
+        return ApiResponse(res, HTTP_STATUS.CREATED, `Category added!`);
+
+    } catch (error) {
+        console.log("Add Category error", error);
         next(error);
     }
 }
